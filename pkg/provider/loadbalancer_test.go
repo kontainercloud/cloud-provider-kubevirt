@@ -26,6 +26,8 @@ const (
 	lbServiceName      string = "af6ebf1722bb111e9b210d663bd873d9"
 	lbServiceNamespace string = "test"
 	clusterName        string = "kvcluster"
+
+	testDatacenterUUID string = "11111111-2222-3333-4444-555555555555"
 )
 
 func makeLoadBalancerStatus(ips, hostnames []string) *corev1.LoadBalancerStatus {
@@ -138,6 +140,7 @@ func newTestLoadBalancer(ctrl *gomock.Controller, rpc rpcLBClient) *loadbalancer
 		config: LoadBalancerConfig{
 			CreationPollInterval: pointer.Int(1),
 			CreationPollTimeout:  pointer.Int(5),
+			DatacenterUUID:       testDatacenterUUID,
 		},
 		rpcClient: rpc,
 	}
@@ -152,6 +155,7 @@ func newTestLoadBalancerWithTenantClient(ctrl *gomock.Controller, tenantC client
 		config: LoadBalancerConfig{
 			CreationPollInterval: pointer.Int(1),
 			CreationPollTimeout:  pointer.Int(5),
+			DatacenterUUID:       testDatacenterUUID,
 		},
 		rpcClient: rpc,
 	}
@@ -293,6 +297,7 @@ var _ = Describe("LoadBalancer", func() {
 				config: LoadBalancerConfig{
 					CreationPollInterval: pointer.Int(1),
 					CreationPollTimeout:  pointer.Int(5),
+					DatacenterUUID:       testDatacenterUUID,
 					FipNetworkID:         "fip-net",
 				},
 				rpcClient: nil,
@@ -366,6 +371,18 @@ var _ = Describe("LoadBalancer", func() {
 			Expect(status.Ingress[0].IP).To(Equal("203.0.113.1"))
 			Expect(status.Ingress[0].IPMode).ToNot(BeNil())
 			Expect(*status.Ingress[0].IPMode).To(Equal(corev1.LoadBalancerIPModeVIP))
+			Expect(fakeRPC.createReqs).To(HaveLen(1))
+			Expect(fakeRPC.createReqs[0].Spec.DatacenterUuid).To(Equal(testDatacenterUUID))
+		})
+
+		It("Should return error and not call RPC if datacenter UUID is not configured", func() {
+			fakeRPC := &fakeRPCClient{}
+			lb.rpcClient = fakeRPC
+			lb.config.DatacenterUUID = ""
+
+			_, err := lb.EnsureLoadBalancer(ctx, clusterName, newTenantService(), newTestNodes())
+			Expect(err).To(MatchError(ContainSubstring("datacenterUUID is not configured")))
+			Expect(fakeRPC.createReqs).To(BeEmpty())
 		})
 
 		It("Should fail fast and report the reason when the load balancer reports FAILED", func() {
@@ -456,6 +473,7 @@ var _ = Describe("LoadBalancer", func() {
 
 			Expect(fakeRPC.createReqs).To(HaveLen(1))
 			Expect(fakeRPC.createReqs[0].IdempotencyKey).ToNot(Equal(string(svc.UID)))
+			Expect(fakeRPC.createReqs[0].Spec.DatacenterUuid).To(Equal(testDatacenterUUID))
 			_, parseErr := uuid.Parse(fakeRPC.createReqs[0].IdempotencyKey)
 			Expect(parseErr).NotTo(HaveOccurred())
 		})
@@ -877,6 +895,7 @@ var _ = Describe("LoadBalancer", func() {
 				config: LoadBalancerConfig{
 					CreationPollInterval: pointer.Int(1),
 					CreationPollTimeout:  pointer.Int(5),
+					DatacenterUUID:       testDatacenterUUID,
 					FipNetworkID:         "fip-net",
 				},
 				rpcClient: nil,

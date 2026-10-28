@@ -23,6 +23,7 @@ helm install ccm-tenant ./charts/kubevirt-cloud-controller-manager \
   --namespace new3 --create-namespace \
   --set clusterName=capi-slowstart \
   --set rpcServerAddr=10.2.3.250:9000 \
+  --set datacenterUUID=<datacenter-uuid> \
   --set networkID=e31344bd-5840-4e67-b9f4-42f2d022655c \
   --set subnetID=34ae98d5-c02d-48f7-a525-19dc6ea10032 \
   --set fipNetworkID=46a8ddf9-a531-4c81-9451-d221f59b19ea \
@@ -39,6 +40,7 @@ helm install ccm-infra ./charts/kubevirt-cloud-controller-manager \
   --set onlyServiceController=true \
   --set concurrentServiceSyncs=5 \
   --set rpcServerAddr=10.2.3.250:9000 \
+  --set datacenterUUID=<datacenter-uuid> \
   --set fipNetworkID=46a8ddf9-a531-4c81-9451-d221f59b19ea \
   --set ipType=internal
 ```
@@ -61,6 +63,7 @@ and either a namespaced `Role`/`RoleBinding` (mode 1) or a
 | `rpcKeepAlive` | `30` | Deadline for a single RPC attempt, seconds. Each retry gets a fresh one, so an unreachable server blocks a sync for at most `(rpcRetryMax + 1) x rpcKeepAlive` |
 | `rpcRetryMax` | `3` | Extra retry attempts per RPC |
 | `apiKey` | `""` | Bearer token for the LoadBalancer API; empty disables auth |
+| `datacenterUUID` | — | UUID of the datacenter whose loadbalancer-controller manages the LBs this CCM creates; sent as `datacenter_uuid` on every `CreateLoadBalancer`. **Required when `rpcServerAddr` is set** (chart render fails otherwise; LB creation errors if empty) |
 | `networkID`, `subnetID`, `tenantID` | — | OpenStack IDs used in mode 1 (ignored in mode 2) |
 | `fipNetworkID` | — | External network for floating IPs. **Required whenever `ipType` is `external` or `both`** |
 | `ipType` | `external` | `external` \| `internal` \| `both`; default for all Services |

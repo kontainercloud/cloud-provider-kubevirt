@@ -87,7 +87,8 @@ from the Secret `{{ .Values.clusterName }}-kubeconfig`.
   every routable IP of the VMI's `default` interface — the guest agent also
   reports the kernel's link-local address there, which is filtered out; see §8.
 * Network/subnet/tenant IDs come from **cloud-config** (`networkID`, `subnetID`,
-  `tenantID`, `fipNetworkID`, `ipType`).
+  `tenantID`, `fipNetworkID`, `ipType`). `datacenterUUID` (also from cloud-config)
+  is sent as `datacenter_uuid` on every `CreateLoadBalancer`.
 * RBAC is a namespaced `Role`/`RoleBinding` covering `virtualmachines`,
   `virtualmachineinstances`, `pods`, `nodes`, `services`, `endpoints`.
 * A tenant user creates `type: LoadBalancer`; the CCM builds one listener per

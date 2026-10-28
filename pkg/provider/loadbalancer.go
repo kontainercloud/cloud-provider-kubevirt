@@ -211,12 +211,17 @@ func (lb *loadbalancer) EnsureLoadBalancer(ctx context.Context, clusterName stri
 			return nil, fmt.Errorf("FIP network ID is not configured; load balancer creation requires floating IP support")
 		}
 
+		if lb.config.DatacenterUUID == "" {
+			return nil, fmt.Errorf("loadBalancer.datacenterUUID is not configured; load balancer creation requires a datacenter UUID")
+		}
+
 		tenantID := lb.getTenantID(service)
 
 		spec := &loadbalancerv1.LoadBalancerSpec{
 			TenantId:              tenantID,
 			NetworkId:             lb.getNetworkID(service),
 			SubnetId:              lb.getSubnetID(service),
+			DatacenterUuid:        lb.config.DatacenterUUID,
 			Listeners:             listeners,
 			ClientConnLimit:       defaultClientConnLimit,
 			SecurityGroupDisabled: true,
@@ -332,6 +337,7 @@ func (lb *loadbalancer) EnsureLoadBalancer(ctx context.Context, clusterName stri
 				TenantId:              tenantID,
 				NetworkId:             lb.getNetworkID(service),
 				SubnetId:              lb.getSubnetID(service),
+				DatacenterUuid:        lb.config.DatacenterUUID,
 				Listeners:             listeners,
 				ClientConnLimit:       defaultClientConnLimit,
 				SecurityGroupDisabled: true,

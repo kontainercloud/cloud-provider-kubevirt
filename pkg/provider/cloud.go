@@ -93,6 +93,10 @@ type LoadBalancerConfig struct {
 	// TenantID is the OpenStack tenant ID for load balancer
 	TenantID string `yaml:"tenantID,omitempty"`
 
+	// DatacenterUUID is the datacenter whose loadbalancer-controller manages the
+	// load balancers created by this cloud provider. Required by the LB API.
+	DatacenterUUID string `yaml:"datacenterUUID,omitempty"`
+
 	// FipNetworkID is the external network ID for floating IP allocation
 	FipNetworkID string `yaml:"fipNetworkID,omitempty"`
 
