@@ -201,7 +201,10 @@ func (lb *loadbalancer) EnsureLoadBalancer(ctx context.Context, clusterName stri
 	lbName := lb.GetLoadBalancerName(ctx, clusterName, service)
 	lbID := service.Annotations[LoadBalancerIDAnnotationKey]
 
-	listeners := lb.buildListeners(ctx, service, nodes, clusterName)
+	listeners, err := lb.buildListeners(ctx, service, nodes, clusterName)
+	if err != nil {
+		return nil, err
+	}
 	if err := validateListeners(listeners); err != nil {
 		return nil, err
 	}
@@ -607,18 +610,22 @@ func (lb *loadbalancer) loadBalancerStatusFromResponse(service *corev1.Service, 
 // several rules per HTTP listener and several weighted backends per rule; a
 // Kubernetes Service has nothing to express with either, so this stays at the
 // shape TCP and UDP listeners are restricted to anyway.
-func (lb *loadbalancer) buildListeners(ctx context.Context, service *corev1.Service, nodes []*corev1.Node, clusterName string) []*loadbalancerv1.Listener {
+func (lb *loadbalancer) buildListeners(ctx context.Context, service *corev1.Service, nodes []*corev1.Node, clusterName string) ([]*loadbalancerv1.Listener, error) {
 	listeners := make([]*loadbalancerv1.Listener, 0, len(service.Spec.Ports))
 
 	for _, port := range service.Spec.Ports {
 		protocol := listenerProtocol(service, port)
+		endpoints, err := lb.buildEndpoints(ctx, port, nodes, clusterName)
+		if err != nil {
+			return nil, err
+		}
 
 		rule := &loadbalancerv1.ListenerRule{
 			Algorithm: defaultAlgorithm,
 			Backends: []*loadbalancerv1.RuleBackend{{
 				Name:      defaultBackendName,
 				Weight:    defaultBackendWeight,
-				Endpoints: lb.buildEndpoints(ctx, port, nodes, clusterName),
+				Endpoints: endpoints,
 			}},
 		}
 
@@ -671,7 +678,7 @@ func (lb *loadbalancer) buildListeners(ctx context.Context, service *corev1.Serv
 		})
 	}
 
-	return listeners
+	return listeners, nil
 }
 
 // listenerProtocol picks the listener protocol for one Service port. HTTP is
@@ -790,42 +797,36 @@ func (lb *loadbalancer) parseHTTPMethod(method string) loadbalancerv1.HttpMethod
 // never carry a link-local address, but in the infra-cluster deployment the node
 // list comes from another cloud provider entirely, and an unroutable endpoint is
 // not merely useless: it makes the whole load balancer fail to provision.
-func (lb *loadbalancer) buildEndpoints(ctx context.Context, port corev1.ServicePort, nodes []*corev1.Node, clusterName string) []*loadbalancerv1.BackendRef {
+func (lb *loadbalancer) buildEndpoints(ctx context.Context, port corev1.ServicePort, nodes []*corev1.Node, clusterName string) ([]*loadbalancerv1.BackendRef, error) {
 	endpoints := make([]*loadbalancerv1.BackendRef, 0)
-
-	if len(nodes) > 0 {
-		for _, node := range nodes {
+	for _, node := range nodes {
+		start := len(endpoints)
+		// Prefer internal addresses for each node independently. One node's
+		// internal IP must not suppress another node's external IP fallback.
+		for _, addrType := range []corev1.NodeAddressType{corev1.NodeInternalIP, corev1.NodeExternalIP} {
 			for _, addr := range node.Status.Addresses {
-				if addr.Type == corev1.NodeInternalIP && isUsableNodeIP(addr.Address) {
-					endpoints = append(endpoints, &loadbalancerv1.BackendRef{
-						Ip:   addr.Address,
-						Port: port.NodePort,
-					})
+				if addr.Type == addrType && isUsableNodeIP(addr.Address) {
+					endpoints = append(endpoints, &loadbalancerv1.BackendRef{Ip: addr.Address, Port: port.NodePort})
 				}
+			}
+			if len(endpoints) > start {
+				break
 			}
 		}
-
-		if len(endpoints) == 0 {
-			klog.Warningf("No internal IPs found for backend endpoints, trying external IPs")
-			for _, node := range nodes {
-				for _, addr := range node.Status.Addresses {
-					if addr.Type == corev1.NodeExternalIP && isUsableNodeIP(addr.Address) {
-						endpoints = append(endpoints, &loadbalancerv1.BackendRef{
-							Ip:   addr.Address,
-							Port: port.NodePort,
-						})
-					}
-				}
-			}
+		if len(endpoints) == start {
+			// Keep the Service queued: the service controller does not sync on
+			// address-only node changes. Do not replace the existing backends
+			// with a partial list or unrelated VMIs while an address is pending.
+			return nil, fmt.Errorf("no usable node address found for node %s, load balancer port %d; waiting for node addresses", node.Name, port.Port)
 		}
 	}
 
-	if len(endpoints) == 0 && clusterName != "" {
+	if len(nodes) == 0 && clusterName != "" {
 		klog.Warningf("No backend IPs from nodes, falling back to VMI IPs for cluster %s", clusterName)
 		endpoints = lb.buildEndpointsFromVMI(ctx, port, clusterName)
 	}
 
-	return normalizeEndpoints(endpoints)
+	return normalizeEndpoints(endpoints), nil
 }
 
 // normalizeEndpoints drops duplicate ip:port pairs and sorts what is left.
@@ -922,7 +923,10 @@ func (lb *loadbalancer) UpdateLoadBalancer(ctx context.Context, clusterName stri
 		return fmt.Errorf("load balancer ID not found in service annotations")
 	}
 
-	listeners := lb.buildListeners(ctx, service, nodes, clusterName)
+	listeners, err := lb.buildListeners(ctx, service, nodes, clusterName)
+	if err != nil {
+		return err
+	}
 	if err := validateListeners(listeners); err != nil {
 		return err
 	}

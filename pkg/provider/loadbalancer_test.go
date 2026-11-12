@@ -450,7 +450,7 @@ var _ = Describe("LoadBalancer", func() {
 				LoadBalancerCreateCountAnnotationKey: "1",
 				// Matching hash, so the retry counter is what advances rather
 				// than the "config changed" branch.
-				LoadBalancerListenerHashAnnotationKey: listenersHashStr(lb.buildListeners(ctx, svc, newTestNodes(), clusterName)),
+				LoadBalancerListenerHashAnnotationKey: listenersHashStr(mustBuildListeners(lb, ctx, svc, newTestNodes(), clusterName)),
 			}
 
 			tenantC.EXPECT().Get(ctx, client.ObjectKey{Name: "service1", Namespace: "test"}, gomock.Any()).DoAndReturn(func(_ context.Context, _ client.ObjectKey, obj client.Object, _ ...client.GetOption) error {
@@ -953,7 +953,7 @@ var _ = Describe("LoadBalancer", func() {
 			tenantC.EXPECT().Update(ctx, gomock.Any()).DoAndReturn(func(_ context.Context, obj client.Object, _ ...client.UpdateOption) error {
 				Expect(obj.(*corev1.Service).Annotations).To(HaveKeyWithValue(
 					LoadBalancerListenerHashAnnotationKey,
-					listenersHashStr(lb.buildListeners(ctx, svc, newTestNodes(), clusterName)),
+					listenersHashStr(mustBuildListeners(lb, ctx, svc, newTestNodes(), clusterName)),
 				))
 				return nil
 			})
@@ -978,7 +978,7 @@ var _ = Describe("LoadBalancer", func() {
 			svc := newTenantService()
 			svc.Annotations = map[string]string{LoadBalancerIDAnnotationKey: "lb-1"}
 			svc.Annotations[LoadBalancerListenerHashAnnotationKey] = listenersHashStr(
-				lb.buildListeners(ctx, svc, newTestNodes(), clusterName),
+				mustBuildListeners(lb, ctx, svc, newTestNodes(), clusterName),
 			)
 
 			err := lb.UpdateLoadBalancer(ctx, clusterName, svc, newTestNodes())
@@ -1173,7 +1173,7 @@ var _ = Describe("LoadBalancer", func() {
 		})
 
 		It("Should build one rule with one backend per port", func() {
-			listeners := lb.buildListeners(ctx, newTenantService(), newTestNodes(), clusterName)
+			listeners := mustBuildListeners(lb, ctx, newTenantService(), newTestNodes(), clusterName)
 
 			Expect(listeners).To(HaveLen(1))
 			Expect(listeners[0].GetPort()).To(Equal(int32(80)))
@@ -1194,7 +1194,7 @@ var _ = Describe("LoadBalancer", func() {
 
 		It("Should list every node address as an endpoint, sorted and deduplicated", func() {
 			nodes := append(newTestNodes(), newTestNodes()[0])
-			listeners := lb.buildListeners(ctx, newTenantService(), nodes, clusterName)
+			listeners := mustBuildListeners(lb, ctx, newTenantService(), nodes, clusterName)
 
 			endpoints := listeners[0].GetRules()[0].GetBackends()[0].GetEndpoints()
 			Expect(endpoints).To(HaveLen(2))
@@ -1212,7 +1212,7 @@ var _ = Describe("LoadBalancer", func() {
 				HTTPRouteMethodAnnotationKey: "post",
 			}
 
-			listeners := lb.buildListeners(ctx, svc, newTestNodes(), clusterName)
+			listeners := mustBuildListeners(lb, ctx, svc, newTestNodes(), clusterName)
 			Expect(listeners[0].GetProtocol()).To(Equal(loadbalancerv1.Protocol_PROTOCOL_HTTP))
 
 			rule := listeners[0].GetRules()[0]
@@ -1234,7 +1234,7 @@ var _ = Describe("LoadBalancer", func() {
 			svc := newTenantService()
 			svc.Annotations = map[string]string{HTTPRoutePathAnnotationKey: ""}
 
-			rule := lb.buildListeners(ctx, svc, newTestNodes(), clusterName)[0].GetRules()[0]
+			rule := mustBuildListeners(lb, ctx, svc, newTestNodes(), clusterName)[0].GetRules()[0]
 			// An empty list is the catch-all; an empty match would be rejected.
 			Expect(rule.GetMatches()).To(BeEmpty())
 			Expect(rule.GetHealthMonitor().GetHttpHealthCheckPath()).To(Equal(defaultHealthCheckPath))
@@ -1244,7 +1244,7 @@ var _ = Describe("LoadBalancer", func() {
 			svc := newTenantService()
 			svc.Spec.Ports[0].Protocol = corev1.ProtocolUDP
 
-			listeners := lb.buildListeners(ctx, svc, newTestNodes(), clusterName)
+			listeners := mustBuildListeners(lb, ctx, svc, newTestNodes(), clusterName)
 			Expect(listeners[0].GetProtocol()).To(Equal(loadbalancerv1.Protocol_PROTOCOL_UDP))
 			// L4 listeners must carry exactly one rule and no matches.
 			Expect(listeners[0].GetRules()).To(HaveLen(1))
@@ -1260,7 +1260,7 @@ var _ = Describe("LoadBalancer", func() {
 				}},
 			}}
 
-			endpoints := lb.buildListeners(ctx, newTenantService(), nodes, "")[0].
+			endpoints := mustBuildListeners(lb, ctx, newTenantService(), nodes, "")[0].
 				GetRules()[0].GetBackends()[0].GetEndpoints()
 			Expect(endpoints).To(HaveLen(1))
 			Expect(endpoints[0].GetIp()).To(Equal("10.0.0.7"))
@@ -1275,7 +1275,7 @@ var _ = Describe("LoadBalancer", func() {
 				}},
 			}}
 
-			endpoints := lb.buildListeners(ctx, newTenantService(), nodes, "")[0].
+			endpoints := mustBuildListeners(lb, ctx, newTenantService(), nodes, "")[0].
 				GetRules()[0].GetBackends()[0].GetEndpoints()
 			Expect(endpoints).To(HaveLen(1))
 			Expect(endpoints[0].GetIp()).To(Equal("192.0.2.7"))
@@ -1286,8 +1286,8 @@ var _ = Describe("LoadBalancer", func() {
 			nodes := newTestNodes()
 			reversed := []*corev1.Node{nodes[1], nodes[0]}
 
-			Expect(listenersHashStr(lb.buildListeners(ctx, svc, nodes, clusterName))).
-				To(Equal(listenersHashStr(lb.buildListeners(ctx, svc, reversed, clusterName))))
+			Expect(listenersHashStr(mustBuildListeners(lb, ctx, svc, nodes, clusterName))).
+				To(Equal(listenersHashStr(mustBuildListeners(lb, ctx, svc, reversed, clusterName))))
 		})
 	})
 
@@ -1392,3 +1392,10 @@ var _ = Describe("LoadBalancer", func() {
 	})
 
 })
+
+func mustBuildListeners(lb *loadbalancer, ctx context.Context, service *corev1.Service, nodes []*corev1.Node, clusterName string) []*loadbalancerv1.Listener {
+	GinkgoHelper()
+	listeners, err := lb.buildListeners(ctx, service, nodes, clusterName)
+	Expect(err).NotTo(HaveOccurred())
+	return listeners
+}
